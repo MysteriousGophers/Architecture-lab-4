@@ -98,6 +98,31 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func chooseServer() string {
+	poolLock.Lock()
+	defer poolLock.Unlock()
+
+	var minTrafficServer string
+	var minTraffic int64 = -1
+
+	for _, server := range poolOfHealthyServers {
+		if traffic, exists := serverTraffic[server]; exists {
+			if minTraffic == -1 || traffic < minTraffic {
+				minTraffic = traffic
+				minTrafficServer = server
+			}
+		} else {
+			serverTraffic[server] = 0
+			if minTraffic == -1 {
+				minTraffic = 0
+				minTrafficServer = server
+			}
+		}
+	}
+
+	return minTrafficServer
+}
+
 func healthCheck(servers []string) {
 	healthStatus := make(map[string]bool)
 	for _, server := range servers {
@@ -139,8 +164,13 @@ func main() {
 	healthCheck(serversPool)
 
 	frontend := httptools.CreateServer(*port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		// TODO: Рееалізуйте свій алгоритм балансувальника.
-		err := forward(serversPool[0], rw, r)
+		server := chooseServer()
+		if server == "" {
+			http.Error(rw, "No healthy servers available", http.StatusServiceUnavailable)
+			return
+		}
+
+		err := forward(server, rw, r)
 		if err != nil {
 			return
 		}

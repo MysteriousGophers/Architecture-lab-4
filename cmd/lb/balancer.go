@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/mysteriousgophers/architecture-lab-4/httptools"
@@ -28,6 +29,8 @@ var (
 		"server2:8080",
 		"server3:8080",
 	}
+	poolOfHealthyServers = make([]string, len(serversPool))
+	poolLock             sync.Mutex
 )
 
 func scheme() string {
@@ -84,18 +87,45 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 	}
 }
 
+func healthCheck(servers []string) {
+	healthStatus := make(map[string]bool)
+	for _, server := range servers {
+		healthStatus[server] = true
+	}
+
+	for i, server := range servers {
+		go func(server string) {
+			for range time.Tick(10 * time.Second) {
+				isHealthy := health(server)
+				poolLock.Lock()
+
+				if isHealthy {
+					healthStatus[server] = true
+					poolOfHealthyServers[i] = server
+				} else {
+					healthStatus[server] = false
+					poolOfHealthyServers[i] = ""
+				}
+
+				poolOfHealthyServers = nil
+
+				for _, server := range servers {
+					if healthStatus[server] {
+						poolOfHealthyServers = append(poolOfHealthyServers, server)
+					}
+				}
+
+				poolLock.Unlock()
+				log.Println(server, isHealthy)
+			}
+		}(server)
+	}
+}
+
 func main() {
 	flag.Parse()
 
-	// TODO: Використовуйте дані про стан сервреа, щоб підтримувати список тих серверів, яким можна відправляти ззапит.
-	for _, server := range serversPool {
-		server := server
-		go func() {
-			for range time.Tick(10 * time.Second) {
-				log.Println(server, health(server))
-			}
-		}()
-	}
+	healthCheck(serversPool)
 
 	frontend := httptools.CreateServer(*port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		// TODO: Рееалізуйте свій алгоритм балансувальника.

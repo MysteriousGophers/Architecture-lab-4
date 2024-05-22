@@ -30,6 +30,7 @@ var (
 		"server3:8080",
 	}
 	poolOfHealthyServers = make([]string, len(serversPool))
+	serverTraffic        = make(map[string]int64)
 	poolLock             sync.Mutex
 )
 
@@ -55,7 +56,8 @@ func health(dst string) bool {
 }
 
 func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
-	ctx, _ := context.WithTimeout(r.Context(), timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 	fwdRequest := r.Clone(ctx)
 	fwdRequest.RequestURI = ""
 	fwdRequest.URL.Host = dst
@@ -63,28 +65,37 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 	fwdRequest.Host = dst
 
 	resp, err := http.DefaultClient.Do(fwdRequest)
-	if err == nil {
-		for k, values := range resp.Header {
-			for _, value := range values {
-				rw.Header().Add(k, value)
-			}
-		}
-		if *traceEnabled {
-			rw.Header().Set("lb-from", dst)
-		}
-		log.Println("fwd", resp.StatusCode, resp.Request.URL)
-		rw.WriteHeader(resp.StatusCode)
-		defer resp.Body.Close()
-		_, err := io.Copy(rw, resp.Body)
-		if err != nil {
-			log.Printf("Failed to write response: %s", err)
-		}
-		return nil
-	} else {
+	if err != nil {
 		log.Printf("Failed to get response from %s: %s", dst, err)
 		rw.WriteHeader(http.StatusServiceUnavailable)
 		return err
 	}
+	defer resp.Body.Close()
+
+	for k, values := range resp.Header {
+		for _, value := range values {
+			rw.Header().Add(k, value)
+		}
+	}
+
+	if *traceEnabled {
+		rw.Header().Set("lb-from", dst)
+	}
+
+	log.Println("fwd", resp.StatusCode, resp.Request.URL)
+	rw.WriteHeader(resp.StatusCode)
+
+	n, err := io.Copy(rw, resp.Body)
+	if err != nil {
+		log.Printf("Failed to write response: %s", err)
+		return err
+	}
+
+	poolLock.Lock()
+	serverTraffic[dst] += n
+	poolLock.Unlock()
+
+	return nil
 }
 
 func healthCheck(servers []string) {
@@ -129,7 +140,10 @@ func main() {
 
 	frontend := httptools.CreateServer(*port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		// TODO: Рееалізуйте свій алгоритм балансувальника.
-		forward(serversPool[0], rw, r)
+		err := forward(serversPool[0], rw, r)
+		if err != nil {
+			return
+		}
 	}))
 
 	log.Println("Starting load balancer...")

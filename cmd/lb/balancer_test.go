@@ -2,8 +2,7 @@ package main
 
 import (
 	"bytes"
-	"fmt"
-	"github.com/stretchr/testify/assert"
+	. "gopkg.in/check.v1"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -35,15 +34,21 @@ func (rs *FakeReturnRequestBodyRequestSender) Send(request *http.Request) (*http
 	}, nil
 }
 
-func TestScheme(t *testing.T) {
+func Test(t *testing.T) { TestingT(t) }
+
+type MySuite struct{}
+
+var _ = Suite(&MySuite{})
+
+func (s *MySuite) TestScheme(c *C) {
 	*https = true
-	assert.Equal(t, "https", scheme(), "Expected scheme to be https")
+	c.Assert(scheme(), Equals, "https")
 
 	*https = false
-	assert.Equal(t, "http", scheme(), "Expected scheme to be http")
+	c.Assert(scheme(), Equals, "http")
 }
 
-func TestBalancer(t *testing.T) {
+func (s *MySuite) TestBalancer(c *C) {
 	healthChecker = &FakeAlwaysTrueHealthChecker{}
 	requestSender = &FakeReturnRequestBodyRequestSender{}
 	serversPool = []string{"http://server1:1", "http://server2:1", "http://server3:1"}
@@ -51,16 +56,14 @@ func TestBalancer(t *testing.T) {
 	time.Sleep(10 * time.Second)
 
 	server := chooseServer()
-	fmt.Println(server)
-	assert.NotNil(t, server, "Assert server is not nil")
-	assert.Contains(t, server, "http://server", "Assert server is not nil")
+	c.Assert(server, NotNil)
+	c.Assert(strings.Contains(server, "http://server"), Equals, true)
 
 	err := forward("http://server1:1", httptest.NewRecorder(), httptest.NewRequest("GET", "http://server1:1", strings.NewReader("body length 14")))
-	assert.NoError(t, err)
+	c.Assert(err, Equals, nil)
 	err = forward("http://server3:1", httptest.NewRecorder(), httptest.NewRequest("GET", "http://server3:1", strings.NewReader("body length 14")))
-	assert.NoError(t, err)
+	c.Assert(err, Equals, nil)
 
 	server = chooseServer()
-
-	assert.Equal(t, "http://server2:1", server, "Expected server2 to be chosen")
+	c.Assert(server, Equals, "http://server2:1")
 }

@@ -32,16 +32,17 @@ var (
 	poolOfHealthyServers = make([]string, len(serversPool))
 	serverTraffic        = make(map[string]int64)
 	poolLock             sync.Mutex
+	healthChecker        HealthChecker
+	requestSender        RequestSender
 )
 
-func scheme() string {
-	if *https {
-		return "https"
-	}
-	return "http"
+type HealthChecker interface {
+	Check(string) bool
 }
 
-func health(dst string) bool {
+type DefaultHealthChecker struct{}
+
+func (hc *DefaultHealthChecker) Check(dst string) bool {
 	ctx, _ := context.WithTimeout(context.Background(), timeout)
 	req, _ := http.NewRequestWithContext(ctx, "GET",
 		fmt.Sprintf("%s://%s/health", scheme(), dst), nil)
@@ -55,6 +56,23 @@ func health(dst string) bool {
 	return true
 }
 
+type RequestSender interface {
+	Send(*http.Request) (*http.Response, error)
+}
+
+type DefaultRequestSender struct{}
+
+func (rs *DefaultRequestSender) Send(fwdRequest *http.Request) (*http.Response, error) {
+	return http.DefaultClient.Do(fwdRequest)
+}
+
+func scheme() string {
+	if *https {
+		return "https"
+	}
+	return "http"
+}
+
 func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
@@ -64,7 +82,7 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 	fwdRequest.URL.Scheme = scheme()
 	fwdRequest.Host = dst
 
-	resp, err := http.DefaultClient.Do(fwdRequest)
+	resp, err := requestSender.Send(fwdRequest)
 	if err != nil {
 		log.Printf("Failed to get response from %s: %s", dst, err)
 		rw.WriteHeader(http.StatusServiceUnavailable)
@@ -132,7 +150,7 @@ func healthCheck(servers []string) {
 	for i, server := range servers {
 		go func(server string) {
 			for range time.Tick(10 * time.Second) {
-				isHealthy := health(server)
+				isHealthy := healthChecker.Check(server)
 				poolLock.Lock()
 
 				if isHealthy {
@@ -160,6 +178,9 @@ func healthCheck(servers []string) {
 
 func main() {
 	flag.Parse()
+
+	healthChecker = &DefaultHealthChecker{}
+	requestSender = &DefaultRequestSender{}
 
 	healthCheck(serversPool)
 

@@ -1,6 +1,7 @@
 package datastore
 
 import (
+	"errors"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -74,7 +75,7 @@ func TestDb_Put(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
-		db, err = NewDb(dir, 10)
+		db, err = NewDb(dir, 45)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,6 +154,70 @@ func TestDb_Segmentation(t *testing.T) {
 		expected := int64(45)
 		if actual != expected {
 			t.Errorf("An error occurred during segmentation. Expected size %d, Actual one: %d", expected, actual)
+		}
+	})
+}
+
+func TestDb_HashCheck(t *testing.T) {
+	dir, err := ioutil.TempDir("", "test-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	db, err := NewDb(dir, 150)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	err = db.Put("key1", "value1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.Put("key2", "value2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.Put("key3", "value3")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("hash check on Get operation", func(t *testing.T) {
+		val, err := db.Get("key1")
+		if err != nil {
+			t.Errorf("Failed to get existing key: %v", err)
+		}
+		if val != "value1" {
+			t.Errorf("Bad value returned expected value1, got %s", val)
+		}
+
+		// simulate corrupted data by directly modifying the file
+		filePath := db.segments[0].filePath
+		file, err := os.OpenFile(filePath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+
+		pos := db.segments[0].index["key1"]
+		file.Seek(pos+12+int64(len("key1")), 0)
+		file.Write([]byte("corupt"))
+
+		// try to get the corrupted key
+		_, err = db.Get("key1")
+		if !errors.Is(err, ErrHashMismatch) {
+			t.Errorf("Expected ErrHashMismatch for corrupted data, got: %v", err)
+		}
+
+		// confirm other key still present and uncorrupted
+		val, err = db.Get("key2")
+		if err != nil {
+			t.Errorf("Failed to get existing key: %v", err)
+		}
+		if val != "value2" {
+			t.Errorf("Bad value returned expected value2, got %s", val)
 		}
 	})
 }

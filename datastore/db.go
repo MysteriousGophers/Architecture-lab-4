@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"bufio"
+	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -24,7 +25,7 @@ type IndexOp struct {
 }
 
 type PutOp struct {
-	entry entry
+	entry Entry
 	resp  chan error
 }
 
@@ -57,7 +58,8 @@ type Segment struct {
 }
 
 var (
-	ErrNotFound = fmt.Errorf("record does not exist")
+	ErrNotFound     = fmt.Errorf("record does not exist")
+	ErrHashMismatch = fmt.Errorf("data integrity check failed")
 )
 
 func NewDb(dir string, segmentSize int64) (*Db, error) {
@@ -193,10 +195,11 @@ func (db *Db) performOldSegmentsCompaction() {
 						continue
 					}
 				}
-				value, _ := s.getFromSegment(index)
-				e := entry{
+				eValue, _ := s.getFromSegment(index)
+				e := Entry{
 					key:   key,
-					value: value,
+					value: eValue.value,
+					hash:  eValue.hash,
 				}
 				n, err := f.Write(e.Encode())
 				if err == nil {
@@ -273,7 +276,7 @@ func (db *Db) recover(f *os.File) error {
 				return fmt.Errorf("corrupted file")
 			}
 
-			var e entry
+			var e Entry
 			e.Decode(data)
 			db.setKey(e.key, int64(n))
 		}
@@ -312,19 +315,26 @@ func (db *Db) Get(key string) (string, error) {
 	if keyPos == nil {
 		return "", ErrNotFound
 	}
-	value, err := keyPos.segment.getFromSegment(keyPos.position)
+	entry, err := keyPos.segment.getFromSegment(keyPos.position)
 	if err != nil {
 		return "", err
 	}
-	return value, nil
+
+	if entry.calculateHash() != entry.hash {
+		return "", ErrHashMismatch
+	}
+
+	return entry.value, nil
 }
 
 func (db *Db) Put(key, value string) error {
 	resp := make(chan error)
+	calHash := calculateHash(value)
 	db.putOps <- PutOp{
-		entry: entry{
+		entry: Entry{
 			key:   key,
 			value: value,
+			hash:  calHash,
 		},
 		resp: resp,
 	}
@@ -337,22 +347,33 @@ func (db *Db) getLastSegment() *Segment {
 	return db.segments[len(db.segments)-1]
 }
 
-func (s *Segment) getFromSegment(position int64) (string, error) {
+func (s *Segment) getFromSegment(position int64) (Entry, error) {
 	file, err := os.Open(s.filePath)
 	if err != nil {
-		return "", err
+		return Entry{}, err
 	}
 	defer file.Close()
 
 	_, err = file.Seek(position, 0)
 	if err != nil {
-		return "", err
+		return Entry{}, err
 	}
 
 	reader := bufio.NewReader(file)
 	value, err := readValue(reader)
 	if err != nil {
-		return "", err
+		return Entry{}, err
 	}
-	return value, nil
+	hash, err := readHash(reader)
+	if err != nil {
+		return Entry{}, err
+	}
+
+	return Entry{value: value, hash: hash}, nil
+}
+
+func calculateHash(value string) string {
+	h := sha1.New()
+	h.Write([]byte(value))
+	return fmt.Sprintf("%x", h.Sum(nil))
 }

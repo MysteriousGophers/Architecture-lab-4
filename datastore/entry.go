@@ -23,6 +23,10 @@ func (e *entry) Encode() []byte {
 	return res
 }
 
+func (e *entry) GetLength() int64 {
+	return getLength(e.key, e.value)
+}
+
 func (e *entry) Decode(input []byte) {
 	kl := binary.LittleEndian.Uint32(input[4:])
 	keyBuf := make([]byte, kl)
@@ -66,4 +70,8 @@ func readValue(in *bufio.Reader) (string, error) {
 	}
 
 	return string(data), nil
+}
+
+func getLength(key string, value string) int64 {
+	return int64(len(key) + len(value) + 12)
 }

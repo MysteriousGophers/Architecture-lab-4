@@ -35,16 +35,19 @@ func TestDb_Put(t *testing.T) {
 
 	t.Run("put/get", func(t *testing.T) {
 		for _, pair := range pairs {
-			err := db.Put(pair[0], pair[1])
+			key := pair[0]
+			value := pair[1]
+
+			err := db.Put(key, value)
 			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
+				t.Errorf("Cannot put %s=%s: %s", key, value, err)
 			}
-			value, err := db.Get(pair[0])
+			actual, err := db.Get(key)
 			if err != nil {
-				t.Errorf("Cannot get %s: %s", pairs[0], err)
+				t.Errorf("Cannot get %s: %s", key, err)
 			}
-			if value != pair[1] {
-				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
+			if actual != value {
+				t.Errorf("Bad value returned expected %s, got %s", value, actual)
 			}
 		}
 	})
@@ -57,9 +60,12 @@ func TestDb_Put(t *testing.T) {
 
 	t.Run("file growth", func(t *testing.T) {
 		for _, pair := range pairs {
-			err := db.Put(pair[0], pair[1])
+			key := pair[0]
+			value := pair[1]
+
+			err := db.Put(key, value)
 			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
+				t.Errorf("Cannot put %s=%s: %s", key, value, err)
 			}
 		}
 		outInfo, err := outFile.Stat()
@@ -81,68 +87,119 @@ func TestDb_Put(t *testing.T) {
 		}
 
 		for _, pair := range pairs {
-			value, err := db.Get(pair[0])
+			key := pair[0]
+			value := pair[1]
+
+			err := db.Put(key, value)
 			if err != nil {
-				t.Errorf("Cannot put %s: %s", pairs[0], err)
+				t.Errorf("Cannot put %s=%s: %s", key, value, err)
 			}
-			if value != pair[1] {
-				t.Errorf("Bad value returned expected %s, got %s", pair[1], value)
+			actual, err := db.Get(key)
+			if err != nil {
+				t.Errorf("Cannot get %s: %s", key, err)
+			}
+			if actual != value {
+				t.Errorf("Bad value returned expected %s, got %s", value, actual)
 			}
 		}
 	})
 }
 
 func TestDb_Segmentation(t *testing.T) {
-	saveDirectory, err := ioutil.TempDir("", "testDir")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(saveDirectory)
-
-	db, err := NewDb(saveDirectory, 35)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
 	t.Run("check creation of new file", func(t *testing.T) {
-		db.Put("1", "v1")
-		db.Put("2", "v2")
-		db.Put("3", "v3")
-		db.Put("2", "v5")
-		actualTwoFiles := len(db.segments)
-		expected2Files := 2
-		if actualTwoFiles != expected2Files {
+		db, saveDirectory := prepareDb(t)
+		defer db.Close()
+		defer os.RemoveAll(saveDirectory)
+
+		put(t, db, "1", "v1")
+		put(t, db, "2", "v2")
+		put(t, db, "3", "v3")
+		put(t, db, "2", "v4")
+
+		if len(db.segments) != 2 {
 			t.Errorf("An error occurred during segmentation. Expected 2 files, but received %d.", len(db.segments))
 		}
 	})
 
 	t.Run("check starting segmentation", func(t *testing.T) {
-		db.Put("4", "v4")
-		actualTreeFiles := len(db.segments)
-		expected3Files := 3
-		if actualTreeFiles != expected3Files {
+		db, saveDirectory := prepareDb(t)
+		defer db.Close()
+		defer os.RemoveAll(saveDirectory)
+
+		put(t, db, "1", "v1")
+		put(t, db, "2", "v2")
+		put(t, db, "3", "v3")
+		put(t, db, "2", "v4")
+		put(t, db, "2", "v5")
+		put(t, db, "4", "v6")
+		put(t, db, "4", "v7")
+
+		if len(db.segments) != 3 {
 			t.Errorf("An error occurred during segmentation. Expected 3 files, but received %d.", len(db.segments))
 		}
 
-		time.Sleep(2 * time.Second)
+		time.Sleep(4 * time.Second)
 
-		actualTwoFiles := len(db.segments)
-		expected2Files := 2
-		if actualTwoFiles != expected2Files {
+		if len(db.segments) != 2 {
 			t.Errorf("An error occurred during segmentation. Expected 2 files, but received %d.", len(db.segments))
 		}
 	})
 
-	t.Run("check not storing new values of duplicate keys", func(t *testing.T) {
-		actual, _ := db.Get("2")
-		expected := "v5"
-		if actual != expected {
-			t.Errorf("An error occurred during segmentation. Expected value: %s, Actual one: %s", expected, actual)
+	t.Run("check not storing new values of duplicate keys after segmentation", func(t *testing.T) {
+		db, saveDirectory := prepareDb(t)
+		defer db.Close()
+		defer os.RemoveAll(saveDirectory)
+
+		put(t, db, "1", "v1")
+		put(t, db, "2", "v2")
+		put(t, db, "3", "v3")
+		put(t, db, "2", "v4")
+		put(t, db, "2", "v5")
+		put(t, db, "2", "v6")
+		put(t, db, "2", "v7")
+
+		if len(db.segments) != 3 {
+			t.Errorf("An error occurred during segmentation. Expected 3 files, but received %d.", len(db.segments))
+		}
+
+		time.Sleep(4 * time.Second)
+
+		if len(db.segments) != 2 {
+			t.Errorf("An error occurred during segmentation. Expected 2 files, but received %d.", len(db.segments))
+		}
+
+		actual, err := db.Get("2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if actual != "v7" {
+			t.Errorf("An error occurred during segmentation. Expected value: %s, Actual one: %s", "v7", actual)
 		}
 	})
 
 	t.Run("check size", func(t *testing.T) {
+		db, saveDirectory := prepareDb(t)
+		defer db.Close()
+		defer os.RemoveAll(saveDirectory)
+
+		put(t, db, "1", "v1")
+		put(t, db, "2", "v2")
+		put(t, db, "3", "v3")
+		put(t, db, "2", "v4")
+		put(t, db, "2", "v5")
+		put(t, db, "2", "v6")
+		put(t, db, "2", "v7")
+
+		if len(db.segments) != 3 {
+			t.Errorf("An error occurred during segmentation. Expected 3 files, but received %d.", len(db.segments))
+		}
+
+		time.Sleep(4 * time.Second)
+
+		if len(db.segments) != 2 {
+			t.Errorf("An error occurred during segmentation. Expected 2 files, but received %d.", len(db.segments))
+		}
+
 		file, err := os.Open(db.segments[0].filePath)
 		defer file.Close()
 
@@ -150,12 +207,30 @@ func TestDb_Segmentation(t *testing.T) {
 			t.Error(err)
 		}
 		inf, _ := file.Stat()
-		actual := inf.Size()
-		expected := int64(45)
-		if actual != expected {
-			t.Errorf("An error occurred during segmentation. Expected size %d, Actual one: %d", expected, actual)
+		if inf.Size() != int64(165) {
+			t.Errorf("An error occurred during segmentation. Expected size %d, Actual one: %d", 165, inf.Size())
 		}
 	})
+}
+
+func prepareDb(t *testing.T) (db *Db, saveDirectory string) {
+	saveDirectory, err := ioutil.TempDir("", "testDir")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = NewDb(saveDirectory, 165)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+func put(t *testing.T, db *Db, key, value string) {
+	err := db.Put(key, value)
+	if err != nil {
+		t.Errorf("An error occurred during segmentation. %s", err)
+	}
 }
 
 func TestDb_HashCheck(t *testing.T) {

@@ -2,9 +2,7 @@ package datastore
 
 import (
 	"bufio"
-	_ "bufio"
 	"encoding/binary"
-	_ "encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -13,9 +11,8 @@ import (
 )
 
 const (
-	outFileName  = "current-data"
-	bufSize      = 8192
-	deleteMarker = "DELETE"
+	outFileName = "current-data"
+	bufSize     = 8192
 )
 
 type hashIndex map[string]int64
@@ -197,9 +194,6 @@ func (db *Db) performOldSegmentsCompaction() {
 					}
 				}
 				value, _ := s.getFromSegment(index)
-				if value == deleteMarker {
-					continue
-				}
 				e := entry{
 					key:   key,
 					value: value,
@@ -322,9 +316,6 @@ func (db *Db) Get(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if value == deleteMarker {
-		return "", ErrNotFound
-	}
 	return value, nil
 }
 
@@ -340,10 +331,6 @@ func (db *Db) Put(key, value string) error {
 	err := <-resp
 	close(resp)
 	return err
-}
-
-func (db *Db) Delete(key string) error {
-	return db.Put(key, deleteMarker)
 }
 
 func (db *Db) getLastSegment() *Segment {

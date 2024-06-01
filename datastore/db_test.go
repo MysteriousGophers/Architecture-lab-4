@@ -141,7 +141,7 @@ func TestDb_Segmentation(t *testing.T) {
 		}
 	})
 
-	t.Run("check szie", func(t *testing.T) {
+	t.Run("check size", func(t *testing.T) {
 		file, err := os.Open(db.segments[0].filePath)
 		defer file.Close()
 
@@ -153,65 +153,6 @@ func TestDb_Segmentation(t *testing.T) {
 		expected := int64(45)
 		if actual != expected {
 			t.Errorf("An error occurred during segmentation. Expected size %d, Actual one: %d", expected, actual)
-		}
-	})
-}
-
-func TestDb_Delete(t *testing.T) {
-	dir, err := ioutil.TempDir("", "test-db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	db, err := NewDb(dir, 150)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	// put some initial data
-	err = db.Put("key1", "value1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.Put("key2", "value2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.Put("key3", "value3")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Run("delete operation", func(t *testing.T) {
-		// delete a key
-		db.Delete("key2")
-
-		// try to get deleted key
-		_, err = db.Get("key2")
-		if err != ErrNotFound {
-			t.Errorf("Expected ErrNotFound for deleted key, got: %v", err)
-		}
-
-		// confirm other key still present
-		val, err := db.Get("key1")
-		if err != nil {
-			t.Errorf("Failed to get existing key: %v", err)
-		}
-		if val != "value1" {
-			t.Errorf("Bad value returned expected value1, got %s", val)
-		}
-	})
-
-	t.Run("delete non-existing key", func(t *testing.T) {
-		// delete a non-existing key
-		db.Delete("key4")
-
-		// confirm that the non-existing key is still non-existing
-		_, err = db.Get("key4")
-		if err != ErrNotFound {
-			t.Errorf("Expected ErrNotFound for non-existing key, got: %v", err)
 		}
 	})
 }

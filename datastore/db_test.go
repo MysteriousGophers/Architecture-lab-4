@@ -157,6 +157,8 @@ func TestDb_Segmentation(t *testing.T) {
 		put(t, db, "2", "v5")
 		put(t, db, "2", "v6")
 		put(t, db, "2", "v7")
+		put(t, db, "2", "v8")
+		put(t, db, "3", "v9")
 
 		if len(db.segments) != 3 {
 			t.Errorf("An error occurred during segmentation. Expected 3 files, but received %d.", len(db.segments))
@@ -172,8 +174,8 @@ func TestDb_Segmentation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if actual != "v7" {
-			t.Errorf("An error occurred during segmentation. Expected value: %s, Actual one: %s", "v7", actual)
+		if actual != "v8" {
+			t.Errorf("An error occurred during segmentation. Expected value: %s, Actual one: %s", "v8", actual)
 		}
 	})
 
@@ -189,6 +191,8 @@ func TestDb_Segmentation(t *testing.T) {
 		put(t, db, "2", "v5")
 		put(t, db, "2", "v6")
 		put(t, db, "2", "v7")
+		put(t, db, "2", "v8")
+		put(t, db, "2", "v9")
 
 		if len(db.segments) != 3 {
 			t.Errorf("An error occurred during segmentation. Expected 3 files, but received %d.", len(db.segments))
